@@ -1,3 +1,5 @@
+'use strict'
+
 const mongoose = require('mongoose'), Schema = mongoose.Schema
 
 const userSchema = new Schema({
@@ -9,6 +11,10 @@ const userSchema = new Schema({
     password: {
         type: String,
         required: true
+    },
+    nextSong: {
+        type: Schema.Types.ObjectId,
+        ref: 'Song'
     },
     queue: [
         {
@@ -26,11 +32,27 @@ userSchema.methods.addToQueue = function (song) {
     return this.save()
 }
 
-userSchema.methods.getNextSongFromQueue = async function () {
+userSchema.methods.getNextSongFromQueue = async function (requireNextSong = false) {
     this.queue = this.queue.filter(song => song.songId != null) //rimuovo eventuali canzoni expirate
     let nextSong = this.queue.shift()
     if (nextSong) nextSong = nextSong.songId
+    this.nextSong = nextSong
     await this.save()
+    return nextSong
+}
+
+userSchema.methods.getQueue = async function () {
+    this.queue = this.queue.filter(song => song.songId != null) //rimuovo eventuali canzoni expirate
+    await this.save()
+    return this.queue
+}
+
+userSchema.methods.getTheNextSong = function () {
+    if (!this.nextSong) return undefined
+    const nextSong = {
+        title: this.nextSong.title,
+        thumbnail: this.nextSong.thumbnail
+    }
     return nextSong
 }
 /*
