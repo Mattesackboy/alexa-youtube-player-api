@@ -1,14 +1,13 @@
 'use strict'
 
+const config = require('./config/config')
 const express = require('express')
 const mongoose = require('mongoose')
 const bodyParser = require('body-parser')
 const cors = require('cors')
 
-const DATABASE_URI = "mongodb+srv://matteo-nodejs-course:3hhcuXY5TkMVsPHy@cluster0-dxehz.gcp.mongodb.net/alexa-youtube-player?retryWrites=true"
-
 //Models
-const User = require('./models/user'), Response = require('./models/response')
+const User = require('./models/user')
 //Routes
 const playerRoutes = require('./routes/player')
 
@@ -16,15 +15,15 @@ const app = express()
 app.use(cors())
 app.use(bodyParser.urlencoded({ extended: false }))
 app.use(bodyParser.json())
-app.use(async (req, res, next) => {
-    req.user = await User.findById('5cdef65db9be9576d597cf01') //dummy user
+app.use(async (req, res, next) => { //MARK: Middleware nel caso di futuro multi-user, per auth
+    req.user = await User.findOne() //dummy user
     next()
 })
 
-app.use('/api', playerRoutes)
+app.use('/api', playerRoutes) //all routes
 
 app.get('/add-songs', (req, res, next) => {
-    return res.send("You should not be here :)")
+    if (process.env.NODE_ENV === "production") return res.send("Testing only endpoint")
     return res.send(`
         <html>
             <head></head>
@@ -39,18 +38,17 @@ app.get('/add-songs', (req, res, next) => {
     `)
 })
 
-mongoose.connect(DATABASE_URI, { useNewUrlParser: true }).then(async () => {
-    //dummy user
-    const user = await User.findOne()
+mongoose.connect(config.db.uri, { useNewUrlParser: true }).then(async () => {
+    const user = await User.findOne() //dummy user, future implementation
     if (!user) {
         const user = new User({
             email: 'matteobrogin@test.com',
-            password: 'hashed-password-xd',
+            password: 'im-blue-da-ba-de',
             queue: []
         })
         await user.save()
     }
-    app.listen(process.env.PORT || 3288, '0.0.0.0', () => {
-        console.log("Listening...")
+    app.listen(config.app.port, config.app.hostname, () => {
+        console.log(`Listening on port ${config.app.port}, current host ${config.app.hostname}`)
     })
 })

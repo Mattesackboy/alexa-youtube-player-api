@@ -1,10 +1,11 @@
 'use strict'
 
+const config = require('../config/config')
 const mongoose = require('mongoose')
 const { google } = require('googleapis')
 const youtube = google.youtube({
     version: "v3",
-    auth: "AIzaSyA1A18StsEUF0rC816XKd68Oe_HI8cgpN0"
+    auth: config.app.youtubeAPIKey
 })
 const ytdl = require('youtube-dl')
 const { promisify } = require('util')
@@ -20,32 +21,6 @@ const Song = require('../models/song'), Response = require('../models/response')
  */
 const urlRegex = /^(https?\:\/\/)?(www\.)?(m\.youtube\.com|youtube\.com|youtu\.?be)\/.+$/
 
-exports.nextSong = async (req, res, next) => {
-    const body = req.body, isCurrentlyPlaying = !!body.isCurrentlyPlaying //TODO: da modificare
-
-    console.log(`Next Song called at ${new Date()}. Body:`, body)
-    
-    req.user = await req.user.populate('currentQueue.queue.songId').populate('currentQueue.nextSong').execPopulate()
-    const nextSong = await req.user.getNextSong(!isCurrentlyPlaying) //o ritorna una song o undefined
-    if (!nextSong) return res.status(200).json(new Response("success", "Queue is empty"))
-    res.status(200).json(new Response("success", "Got next song", {
-        song: nextSong,
-        lastsInQueue: req.user.currentQueue.queue.length + 1
-    })) 
-}
-
-exports.getEnqueuedSong = async (req, res, next) => {
-    console.log("Enqueued Song called.")
-    req.user = await req.user.populate('currentQueue.willPlay').populate('currentQueue.nextSong').execPopulate()
-    //Se non c'è nessuna canzone già inserita in coda, vedo se c'è una `nextSong` (TODO: non funziona ancora perchè se ci sono altre song in queue si bugga e viene riprodotta due volte nextSong)
-    let willPlaySong = req.user.getWillPlaySong()
-    if (req.user.currentQueue.nextSong && !willPlaySong) willPlaySong = await req.user.getNextSong()
-    if (!willPlaySong) return res.status(200).json(new Response("success", "No enqueued song"))
-    res.status(200).json(new Response("success", "Got willPlay song", {
-        song: willPlaySong
-    }))
-}
-
 exports.addToQueue = async (req, res, next) => {
     const body = req.body, songUrl = body.songUrl //|| "https://www.youtube.com/watch?v=tP-F6pKJQAk"
     
@@ -53,7 +28,7 @@ exports.addToQueue = async (req, res, next) => {
 
     try {
         const songInfo = await getInfoFromUrl(songUrl)
-        if (songInfo._duration_raw > 380) return res.status(200).json(new Response("error", "Song duration exceed the 6min limit"))
+        if (songInfo._duration_raw > config.app.maxSongDurationInSeconds) return res.status(200).json(new Response("error", "Song duration limit exceeded"))
         let song = await Song.findOne({ ytId: songInfo.id }) //vedo se c'è una canzone nel db con questo ytId
         if (!song) {
             song = new Song({
@@ -108,6 +83,36 @@ exports.getCurrentUserQueue = async (req, res, next) => {
         enqueuedSong: req.user.getWillPlaySong(),
         queue: queue
     })) 
+}
+
+/**
+ * Alexa Skill Endpoints
+ */
+
+exports.nextSong = async (req, res, next) => {
+    const body = req.body, isCurrentlyPlaying = !!body.isCurrentlyPlaying //TODO: nome da modificare
+
+    console.log(`Next Song called at ${new Date()}. Body:`, body)
+
+    req.user = await req.user.populate('currentQueue.queue.songId').populate('currentQueue.nextSong').execPopulate()
+    const nextSong = await req.user.getNextSong(!isCurrentlyPlaying) //o ritorna una song o undefined
+    if (!nextSong) return res.status(200).json(new Response("success", "Queue is empty"))
+    res.status(200).json(new Response("success", "Got next song", {
+        song: nextSong,
+        lastsInQueue: req.user.currentQueue.queue.length + 1
+    }))
+}
+
+exports.getEnqueuedSong = async (req, res, next) => {
+    console.log("Enqueued Song called.")
+    req.user = await req.user.populate('currentQueue.willPlay').populate('currentQueue.nextSong').execPopulate()
+    //Se non c'è nessuna canzone già inserita in coda, vedo se c'è una `nextSong` (TODO: non funziona ancora perchè se ci sono altre song in queue si bugga e viene riprodotta due volte nextSong)
+    let willPlaySong = req.user.getWillPlaySong()
+    if (req.user.currentQueue.nextSong && !willPlaySong) willPlaySong = await req.user.getNextSong()
+    if (!willPlaySong) return res.status(200).json(new Response("success", "No enqueued song"))
+    res.status(200).json(new Response("success", "Got willPlay song", {
+        song: willPlaySong
+    }))
 }
 
 /**
