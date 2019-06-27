@@ -12,61 +12,88 @@ const userSchema = new Schema({
         type: String,
         required: true
     },
-    nextSong: {
-        type: Schema.Types.ObjectId,
-        ref: 'Song'
-    },
-    queue: [
-        {
-            songId: {
-                type: Schema.Types.ObjectId,
-                ref: 'Song',
-                required: true
+    currentQueue: {
+        nextSong: { //canzone che deve essere presa
+            type: Schema.Types.ObjectId,
+            ref: 'Song'
+        },
+        willPlay: { //canzone già presa, ma non ancora riprodotta
+            type: Schema.Types.ObjectId,
+            ref: 'Song'
+        },
+        queue: [
+            {
+                songId: {
+                    type: Schema.Types.ObjectId,
+                    ref: 'Song',
+                    required: true
+                }
             }
-        }
-    ]
+        ]
+    }
 })
 
+const cleanQueue = (currentQueue) => {
+    const cleanedQueue = currentQueue.queue.filter(song => song.songId != null) //rimuovo eventuali canzoni expirate
+    currentQueue.nextSong = !currentQueue.nextSong ? (cleanedQueue.shift() || {}).songId : currentQueue.nextSong
+    currentQueue.queue = cleanedQueue
+    return currentQueue
+}
+
 userSchema.methods.addToQueue = function (song) {
-    this.queue.push({ songId: song._id })
+    this.currentQueue = cleanQueue(this.currentQueue)
+    if (!this.currentQueue.nextSong) this.currentQueue.nextSong = song._id
+    else this.currentQueue.queue.push({ songId: song._id })
     return this.save()
 }
 
-userSchema.methods.getNextSongFromQueue = async function (requireNextSong = false) {
+userSchema.methods.getCurrentQueue = async function () {
+    this.currentQueue = cleanQueue(this.currentQueue)
+    await this.save()
+    if (!this.currentQueue.nextSong) return this.currentQueue
+    this.currentQueue.queue.unshift({
+        songId: this.currentQueue.nextSong
+    })
+    return this.currentQueue
+}
+
+/**
+ * Se shouldChangeQueue è `true` allora nextSong verrà sostituita con la prossima canzone in coda (default value è `true`)
+ */
+userSchema.methods.getNextSong = async function (shouldChangeQueue = true) {
+    this.currentQueue = cleanQueue(this.currentQueue)
+    if (!this.currentQueue.nextSong && this.currentQueue.queue.length != 0) throw new Error("nextSong is empty but we have songs in the queue")
+    //next song potrebbe essere undefined
+    const nextSong = this.currentQueue.nextSong
+    if (shouldChangeQueue) {
+        this.currentQueue.nextSong = (this.currentQueue.queue.shift() || {}).songId
+        this.currentQueue.willPlay = nextSong
+    }
+    await this.save()
+    return nextSong ? {
+        title: nextSong.title,
+        artist: nextSong.artist,
+        url: nextSong.url,
+        thumbnail: nextSong.thumbnail
+    } : undefined
+}
+
+userSchema.methods.getWillPlaySong = function () {
+    return this.currentQueue.willPlay ? {
+        title: this.currentQueue.willPlay.title,
+        artist: this.currentQueue.willPlay.artist,
+        url: this.currentQueue.willPlay.url,
+        thumbnail: this.currentQueue.willPlay.thumbnail
+    } : undefined
+}
+
+/*userSchema.methods.getNextSongFromQueue = async function (requireNextSong = false) {
     this.queue = this.queue.filter(song => song.songId != null) //rimuovo eventuali canzoni expirate
     let nextSong = this.queue.shift()
     if (nextSong) nextSong = nextSong.songId
     this.nextSong = nextSong
     await this.save()
     return nextSong
-}
-
-userSchema.methods.getQueue = async function () {
-    this.queue = this.queue.filter(song => song.songId != null) //rimuovo eventuali canzoni expirate
-    await this.save()
-    return this.queue
-}
-
-userSchema.methods.getTheNextSong = function () {
-    if (!this.nextSong) return undefined
-    const nextSong = {
-        title: this.nextSong.title,
-        thumbnail: this.nextSong.thumbnail
-    }
-    return nextSong
-}
-/*
-userSchema.methods.removeFromCart = function (productId) {
-    const updatedCartItems = this.cart.items.filter(item => {
-        return item.productId.toString() !== productId.toString()
-    })
-    this.cart.items = updatedCartItems
-    return this.save()
-}
-
-userSchema.methods.clearCart = function () {
-    this.cart = { items: [] }
-    return this.save()
 }*/
 
 module.exports = mongoose.model('User', userSchema)

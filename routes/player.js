@@ -7,6 +7,7 @@ const playerController = require('../controllers/player')
 
 router.post('/add-song-to-queue', playerController.addToQueue)
 router.post('/next-song', playerController.nextSong)
+router.post('/enqueued-song', playerController.getEnqueuedSong)
 router.post('/search', playerController.youtubeSearch)
 router.post('/get-queue', playerController.getCurrentUserQueue)
 

@@ -21,20 +21,29 @@ const Song = require('../models/song'), Response = require('../models/response')
 const urlRegex = /^(https?\:\/\/)?(www\.)?(m\.youtube\.com|youtube\.com|youtu\.?be)\/.+$/
 
 exports.nextSong = async (req, res, next) => {
-    const body = req.body, requireNextSong = !!body.requireNextSong
-    console.log("Next Song called. Body:", body)
-    req.user = await req.user.populate('queue.songId').execPopulate()
-    const nextSong = await req.user.getNextSongFromQueue(requireNextSong) //o ritorna una song o undefined
+    const body = req.body, isCurrentlyPlaying = !!body.isCurrentlyPlaying //TODO: da modificare
+
+    console.log(`Next Song called at ${new Date()}. Body:`, body)
+    
+    req.user = await req.user.populate('currentQueue.queue.songId').populate('currentQueue.nextSong').execPopulate()
+    const nextSong = await req.user.getNextSong(!isCurrentlyPlaying) //o ritorna una song o undefined
     if (!nextSong) return res.status(200).json(new Response("success", "Queue is empty"))
-    res.status(200).json(new Response("success", "", {
-        song: {
-            title: nextSong.title,
-            artist: nextSong.artist,
-            url: nextSong.url,
-            thumbnail: nextSong.thumbnail
-        },
-        lastsInQueue: req.user.queue.length
+    res.status(200).json(new Response("success", "Got next song", {
+        song: nextSong,
+        lastsInQueue: req.user.currentQueue.queue.length + 1
     })) 
+}
+
+exports.getEnqueuedSong = async (req, res, next) => {
+    console.log("Enqueued Song called.")
+    req.user = await req.user.populate('currentQueue.willPlay').populate('currentQueue.nextSong').execPopulate()
+    //Se non c'è nessuna canzone già inserita in coda, vedo se c'è una `nextSong` (TODO: non funziona ancora perchè se ci sono altre song in queue si bugga e viene riprodotta due volte nextSong)
+    let willPlaySong = req.user.getWillPlaySong()
+    if (req.user.currentQueue.nextSong && !willPlaySong) willPlaySong = await req.user.getNextSong()
+    if (!willPlaySong) return res.status(200).json(new Response("success", "No enqueued song"))
+    res.status(200).json(new Response("success", "Got willPlay song", {
+        song: willPlaySong
+    }))
 }
 
 exports.addToQueue = async (req, res, next) => {
@@ -45,7 +54,7 @@ exports.addToQueue = async (req, res, next) => {
     try {
         const songInfo = await getInfoFromUrl(songUrl)
         if (songInfo._duration_raw > 380) return res.status(200).json(new Response("error", "Song duration exceed the 6min limit"))
-        let song = await Song.findOne({ ytId: songInfo.id }) //vedo se c'è una canzone nel db con questo id
+        let song = await Song.findOne({ ytId: songInfo.id }) //vedo se c'è una canzone nel db con questo ytId
         if (!song) {
             song = new Song({
                 title: songInfo.title || "undefined",
@@ -68,7 +77,7 @@ exports.addToQueue = async (req, res, next) => {
 
 exports.youtubeSearch = async (req, res, next) => {
     const query = req.body.query
-    if (!query) return res.status(400).json(new Response("error", "bad req"))
+    if (!query) return res.status(400).json(new Response("error", "Bad Request Sent"))
 
     if (urlRegex.test(query)) { //query è un yt url
         req.body.songUrl = query
@@ -77,7 +86,7 @@ exports.youtubeSearch = async (req, res, next) => {
 
     try {
         const videos = await searchOnYoutube(query)
-        res.status(200).json(new Response("success", "", videos))
+        res.status(200).json(new Response("success", "Got videos", videos))
     } catch(err) {
         console.error(err)
         res.status(500).json(new Response("error", "Internal server error"))
@@ -85,15 +94,18 @@ exports.youtubeSearch = async (req, res, next) => {
 }
 
 exports.getCurrentUserQueue = async (req, res, next) => {
-    req.user = await req.user.populate('queue.songId').populate('nextSong').execPopulate()
-    const queue = (await req.user.getQueue()).map(song => {
+    req.user = await req.user.populate('currentQueue.queue.songId')
+    .populate('currentQueue.willPlay')
+    .populate('currentQueue.nextSong')
+    .execPopulate()
+    const queue = (await req.user.getCurrentQueue()).queue.map(song => {
         return {
             title: song.songId.title,
             thumbnail: song.songId.thumbnail
         }
     })
     res.status(200).json(new Response("success", "Got current queue!", {
-        nextSong: req.user.getTheNextSong(),
+        enqueuedSong: req.user.getWillPlaySong(),
         queue: queue
     })) 
 }
@@ -106,7 +118,7 @@ const searchOnYoutube = (query) => {
     return youtube.search.list({
         part: "id,snippet",
         q: query,
-        maxResults: 10,
+        maxResults: 25,
         type: "video"
     }).then(res => {
         const videos = res.data.items
