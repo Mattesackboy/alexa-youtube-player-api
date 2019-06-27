@@ -12,7 +12,10 @@ const User = require('./models/user')
 const playerRoutes = require('./routes/player')
 
 const app = express()
-app.use(cors())
+app.use(cors({
+    origin: '*',
+    methods: ['GET', 'POST']
+}))
 app.use(bodyParser.urlencoded({ extended: false }))
 app.use(bodyParser.json())
 app.use(async (req, res, next) => { //MARK: Middleware nel caso di futuro multi-user, per auth
